@@ -30,12 +30,8 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     @Override
     public Result queryById(Long id) {
-        //缓存穿透
-//       Shop shop =cacheClient.querryWithPassThrough(CACHE_SHOP_KEY,id, Shop.class,this::getById,CACHE_SHOP_TTL,TimeUnit.MINUTES) ;
-        //互斥锁解决缓存击穿
-        Shop shop = querryWithMutex(id);
-        //逻辑过期解决缓存击穿
-//        Shop shop = cacheClient.querryWithLogicalExpire(CACHE_SHOP_KEY, id, Shop.class, this::getById, 20L, TimeUnit.SECONDS);
+        // 使用二级缓存查询（本地缓存 + Redis缓存）
+        Shop shop = cacheClient.querryWithPassThrough(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
 
         if (shop == null) {
             return Result.fail("店铺不存在");
@@ -87,6 +83,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 //        return shop;
 //    }
 
+    // 互斥锁解决缓存击穿的方法（保留但不使用）
     public Shop querryWithMutex(Long id) {
         //1.从 redis 查缓存
         String shopJson = stringRedisTemplate.opsForValue().get(CACHE_SHOP_KEY + id);
@@ -124,6 +121,8 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             }
             //6.数据库存在，先写入 redis，再返回
             stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, JSONUtil.toJsonStr(shop), CACHE_SHOP_TTL, TimeUnit.MINUTES);
+            // 同时更新本地缓存
+            cacheClient.set(CACHE_SHOP_KEY + id, shop, CACHE_SHOP_TTL, TimeUnit.MINUTES);
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         } finally {
@@ -192,6 +191,8 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         updateById(shop);
         //2.删除缓存
         stringRedisTemplate.delete(CACHE_SHOP_KEY + id);
+        //3.清除本地缓存
+        cacheClient.invalidate(CACHE_SHOP_KEY + id);
         return Result.ok();
     }
 }

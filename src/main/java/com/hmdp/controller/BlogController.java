@@ -2,6 +2,7 @@ package com.hmdp.controller;
 
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.hmdp.annotation.RateLimit;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.Blog;
@@ -36,6 +37,7 @@ public class BlogController {
     }
 
     @PutMapping("/like/{id}")
+    @RateLimit(type = RateLimit.LimitType.USER, window = 60, count = 20, message = "点赞过于频繁，请稍后再试")
     public Result likeBlog(@PathVariable("id") Long id) {
         return blogService.likeBlog(id);
     }

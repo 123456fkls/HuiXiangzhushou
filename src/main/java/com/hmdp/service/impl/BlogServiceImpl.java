@@ -12,6 +12,7 @@ import com.hmdp.mapper.BlogMapper;
 import com.hmdp.service.IBlogService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.service.IUserService;
+import com.hmdp.utils.CacheClient;
 import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.UserHolder;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -21,6 +22,7 @@ import javax.annotation.Resource;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 
@@ -31,11 +33,16 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     private IUserService userService;
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+    @Resource
+    private CacheClient cacheClient;
+    
+    // 博客缓存前缀
+    private static final String CACHE_BLOG_KEY = "cache:blog:";
 
     @Override
     public Result queryBlogById(Long id) {
-        // 查询blog
-        Blog blog = getById(id);
+        // 使用二级缓存查询博客
+        Blog blog = cacheClient.querryWithPassThrough(CACHE_BLOG_KEY, id, Blog.class, this::getById, 30L, TimeUnit.MINUTES);
         if (blog == null) {
             return Result.fail("笔记不存在！");
         }
@@ -90,6 +97,8 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             if (isSuccess) {
                 stringRedisTemplate.opsForZSet()
                         .add("blog:liked:" + id, userId.toString(), System.currentTimeMillis());
+                // 清除本地缓存，确保下次查询时获取最新数据
+                cacheClient.invalidate(CACHE_BLOG_KEY + id);
             }
         } else {
             //如果已点赞
@@ -98,6 +107,8 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             //从redis的set集合中移除
             stringRedisTemplate.opsForZSet()
                     .remove("blog:liked:" + id, userId.toString());
+            // 清除本地缓存，确保下次查询时获取最新数据
+            cacheClient.invalidate(CACHE_BLOG_KEY + id);
         }
         return Result.ok();
     }
